@@ -4,31 +4,35 @@ import scipy
 import numpy as np
 from matplotlib import pyplot as plt
 
-def HarrisPointsDetector(img, window_size, threshold = 50):
-    offset = int((window_size-1)/2)
+def HarrisPointsDetector(img, threshold = None):
     # Find derivatives
-    X = cv2.Sobel(src=img, ddepth=-1, dx=1, dy=0, ksize=3, borderType=cv2.BORDER_REFLECT)
-    Y = cv2.Sobel(src=img, ddepth=-1, dx=0, dy=1, ksize=3, borderType=cv2.BORDER_REFLECT)
-    XY = cv2.Sobel(src=img, ddepth=-1, dx=1, dy=1, ksize=3, borderType=cv2.BORDER_REFLECT)
+    X = cv2.Sobel(src=img, ddepth=cv2.CV_64F, dx=1, dy=0, ksize=3, borderType=cv2.BORDER_REFLECT)
+    Y = cv2.Sobel(src=img, ddepth=cv2.CV_64F, dx=0, dy=1, ksize=3, borderType=cv2.BORDER_REFLECT)
+    XY = cv2.Sobel(src=img, ddepth=cv2.CV_64F, dx=1, dy=1, ksize=3, borderType=cv2.BORDER_REFLECT)
     
+    XX = X**2
+    YY = Y**2
+
     # Apply gaussian
-    gXX = cv2.GaussianBlur(X**2, ksize=(5,5), sigmaX=0.5).astype(np.float32)
-    gYY = cv2.GaussianBlur(Y**2, ksize=(5,5), sigmaX=0.5).astype(np.float32)
+    gXX = cv2.GaussianBlur(XX, ksize=(5,5), sigmaX=0.5).astype(np.float32)
+    gYY = cv2.GaussianBlur(YY, ksize=(5,5), sigmaX=0.5).astype(np.float32)
     gXY = cv2.GaussianBlur(XY, ksize=(5,5), sigmaX=0.5).astype(np.float32)
 
     # Compute gradient orientation for each pixel
     orientation = np.arctan2(Y, X) * (180/np.pi)
 
     # Calculate Harris response
-    harrisResponse = gXX * gYY - gXY**2 - 0.05 * (gXX+gYY)**2
+    harrisResponse = ((gXX * gYY) - (gXY)**2 - 0.05*((gXX+gYY)**2))
 
     # Get responses > 0
     harrisResponse[harrisResponse < 0] = 0
 
-    # Normalise 0 - 255
-    harrisResponse = (255*(harrisResponse - np.min(harrisResponse))/np.ptp(harrisResponse))
+    # Normalise 0 - 1000
+    harrisResponse = (harrisResponse * (1000/np.max(harrisResponse))).astype(np.int32)
 
     points, harrisResponse = NMS(harrisResponse, 7)
+    if (threshold == None):
+        threshold = 0.1 * np.max(harrisResponse)
     print("Done NMS")
     
     kp = []
@@ -60,11 +64,17 @@ def NMS(interestPoints, size):
     interestPoints = interestPoints[offset:-offset, offset:-offset]
     return suppression, interestPoints
 
+def featureDescriptor(img, features):
+    orb = cv2.ORV_create()
+    des = orb.compute(img, features)
+    return(des)
+
 def main():
     # Open image
-    # filename = 'images/bernieSanders.jpg'
-    filename = "images/grey.jpg"
+    filename = 'images/bernieSanders.jpg'
+    # filename = "images/grey.jpg"
     # filename = "images/800px-Checkerboard_pattern.svg.png"
+    # filename = "images/phpicsL2c.png"
     img = cv2.imread(filename)
 
     # Check for success
@@ -78,17 +88,26 @@ def main():
     # Blur src image
     blur = cv2.GaussianBlur(grey, ksize=(3,3), sigmaX=2)
 
-    features, responses = HarrisPointsDetector(blur, 2)
-
-    threshold_count = [len(responses[responses > i]) for i in range(256)]
+    features, responses = HarrisPointsDetector(blur, 0)
+    f = open("something.txt", "w")
+    f.write(np.array2string(responses, threshold=sys.maxsize))
+    f.close()
+    print(np.max(responses))
+    threshold_count = []
+    labels = []
+    split = 1
+    for i in range(int(np.max(responses)/split)):
+        threshold_count.append((responses > i*split).sum())
     
+    print(threshold_count)
     # print(responses[0:100])
     t = plt.figure(1)
-    output = cv2.drawKeypoints(img, features, None, color=(0,255,0), flags=0)
+    output = cv2.drawKeypoints(grey, features, None, color=(0,255,0), flags=0)
     plt.imshow(output)
 
     f = plt.figure(2)
-    plt.plot(threshold_count)
+    plt.plot(np.array(range(len(threshold_count)))*split, threshold_count)
+    plt.title("Number of Interest Points against Threshold")
     plt.xlabel("Threshold")
     plt.ylabel("Number of Interest Points")
 
